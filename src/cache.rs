@@ -1,16 +1,18 @@
 use std::ops::Deref;
+
 use anyhow::anyhow;
 use bytes::Bytes;
 use once_cell::sync::OnceCell;
+
 use crate::config::CacheConfig;
 
 static GLOBAL_CACHE: OnceCell<Cache> = OnceCell::new();
 
 pub fn new_cache(cfg: CacheConfig) -> anyhow::Result<Option<Cache>> {
     if cfg.max_capacity.is_some() && cfg.max_images.is_some() {
-        return Err(anyhow!("Cache must be *either* based off of number of images or amount of memory, not both."))
+        return Err(anyhow!("Cache must be *either* based off of number of images or amount of memory, not both."));
     } else if cfg.max_capacity.is_none() && cfg.max_images.is_none() {
-        return Ok(None)
+        return Ok(None);
     }
 
     let mut cache = moka::sync::CacheBuilder::default();
@@ -52,8 +54,6 @@ impl Deref for Cache {
 
 impl From<moka::sync::Cache<String, Bytes>> for Cache {
     fn from(v: moka::sync::Cache<String, Bytes>) -> Self {
-        Self {
-            inner: v
-        }
+        Self { inner: v }
     }
 }

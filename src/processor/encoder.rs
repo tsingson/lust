@@ -1,9 +1,10 @@
 use std::io::Cursor;
 use std::sync::Arc;
+
 use bytes::Bytes;
 use image::{DynamicImage, ImageFormat};
-use crate::config::{ImageFormats, ImageKind};
 
+use crate::config::{ImageFormats, ImageKind};
 
 pub struct EncodedImage {
     pub kind: ImageKind,
@@ -34,8 +35,14 @@ pub fn encode_following_config(
             rayon::spawn(move || {
                 let result = encode_to(webp_config, &local, (*variant).into());
                 tx_local
-                    .send(result.map(|v| EncodedImage { kind: *variant, buff: v, sizing_id }))
-                    .expect("Failed to respond to encoding request. Sender already closed.");
+                    .send(result.map(|v| EncodedImage {
+                        kind: *variant,
+                        buff: v,
+                        sizing_id,
+                    }))
+                    .expect(
+                        "Failed to respond to encoding request. Sender already closed.",
+                    );
             });
         }
     }
@@ -55,7 +62,6 @@ pub fn encode_following_config(
     Ok(finished)
 }
 
-
 pub fn encode_once(
     webp_cfg: webp::WebPConfig,
     to: ImageKind,
@@ -66,21 +72,28 @@ pub fn encode_once(
 
     rayon::spawn(move || {
         let result = encode_to(webp_cfg, &img, to.into());
-        tx.send(result.map(|v| EncodedImage { kind: to, buff: v, sizing_id }))
-            .expect("Failed to respond to encoding request. Sender already closed.");
+        tx.send(result.map(|v| EncodedImage {
+            kind: to,
+            buff: v,
+            sizing_id,
+        }))
+        .expect("Failed to respond to encoding request. Sender already closed.");
     });
 
     rx.recv()?
 }
 
-
 #[inline]
-pub fn encode_to(webp_cfg: webp::WebPConfig, img: &DynamicImage, format: ImageFormat) -> anyhow::Result<Bytes> {
+pub fn encode_to(
+    webp_cfg: webp::WebPConfig,
+    img: &DynamicImage,
+    format: ImageFormat,
+) -> anyhow::Result<Bytes> {
     if let ImageFormat::WebP = format {
         let webp_image = webp::Encoder::from_image(webp_cfg, img);
         let encoded = webp_image.encode();
 
-        return Ok(Bytes::from(encoded?.to_vec()))
+        return Ok(Bytes::from(encoded?.to_vec()));
     }
 
     let mut buff = Cursor::new(Vec::new());

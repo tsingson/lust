@@ -1,18 +1,19 @@
 mod config;
-mod storage;
-mod routes;
-mod pipelines;
 mod controller;
-mod utils;
+mod pipelines;
 mod processor;
+mod routes;
+mod storage;
+mod utils;
 
+mod cache;
 #[cfg(test)]
 mod tests;
-mod cache;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use mimalloc::MiMalloc;
@@ -21,6 +22,7 @@ use poem::{Endpoint, EndpointExt, IntoResponse, Request, Response, Route, Server
 use poem_openapi::OpenApiService;
 use tokio::sync::Semaphore;
 use tracing::Level;
+
 use crate::controller::BucketController;
 use crate::storage::template::StorageBackend;
 
@@ -29,7 +31,6 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[macro_use]
 extern crate tracing;
-
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]
@@ -57,7 +58,6 @@ pub struct ServerConfig {
     pub config_file: PathBuf,
 }
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: ServerConfig = ServerConfig::parse();
@@ -81,7 +81,9 @@ async fn main() -> Result<()> {
 
     let serving_path = if let Some(p) = config::config().base_serving_path.clone() {
         if !p.starts_with('/') {
-            return Err(anyhow!("Invalid config: Base serving path must start with '/'"))
+            return Err(anyhow!(
+                "Invalid config: Base serving path must start with '/'"
+            ));
         }
 
         p
@@ -89,13 +91,13 @@ async fn main() -> Result<()> {
         "".to_string()
     };
 
-    let api_service = OpenApiService::new(
-        routes::LustApi,
-         "Lust API",
-        env!("CARGO_PKG_VERSION"),
-    )
-    .description(include_str!("../description.md"))
-    .server(args.docs_url.unwrap_or_else(|| format!("http://{}/v1{}", &bind, &serving_path)));
+    let api_service =
+        OpenApiService::new(routes::LustApi, "Lust API", env!("CARGO_PKG_VERSION"))
+            .description(include_str!("../description.md"))
+            .server(
+                args.docs_url
+                    .unwrap_or_else(|| format!("http://{}/v1{}", &bind, &serving_path)),
+            );
 
     let ui = api_service.redoc();
     let spec = api_service.spec();
@@ -107,10 +109,7 @@ async fn main() -> Result<()> {
         .around(log);
 
     info!("Lust has started!");
-    info!(
-        "serving requests @ http://{}",
-        &bind,
-    );
+    info!("serving requests @ http://{}", &bind,);
     info!(
         "Image handling @ http://{}/{}",
         &bind,
@@ -142,10 +141,7 @@ async fn setup_buckets() -> anyhow::Result<()> {
         .map(Semaphore::new)
         .map(Arc::new);
 
-    let storage: Arc<dyn StorageBackend> = config::config()
-        .backend
-        .connect()
-        .await?;
+    let storage: Arc<dyn StorageBackend> = config::config().backend.connect().await?;
 
     let buckets = config::config()
         .buckets
@@ -153,10 +149,7 @@ async fn setup_buckets() -> anyhow::Result<()> {
         .map(|(bucket, cfg)| {
             let bucket_id = crate::utils::crc_hash(bucket);
             let pipeline = cfg.mode.build_pipeline(cfg);
-            let cache = cfg.cache
-                .map(cache::new_cache)
-                .transpose()?
-                .flatten();
+            let cache = cfg.cache.map(cache::new_cache).transpose()?.flatten();
 
             let controller = BucketController::new(
                 bucket_id,
@@ -198,7 +191,6 @@ async fn wait_for_signal() -> Result<()> {
 
     Ok(())
 }
-
 
 async fn log<E: Endpoint>(next: E, req: Request) -> poem::Result<Response> {
     let method = req.method().clone();

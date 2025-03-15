@@ -1,6 +1,5 @@
-mod register;
-mod filesystem;
 mod blob_storage;
-mod scylladb;
+mod filesystem;
+mod register;
 
 pub use register::BackendConfigs;

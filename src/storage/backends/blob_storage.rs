@@ -1,10 +1,18 @@
 use std::time::Duration;
+
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use rusoto_core::credential::{AutoRefreshingProvider, ChainProvider};
 use rusoto_core::{HttpClient, HttpConfig, Region};
-use rusoto_s3::{DeleteObjectRequest, GetObjectRequest, PutObjectRequest, S3Client, S3, StreamingBody};
+use rusoto_s3::{
+    DeleteObjectRequest,
+    GetObjectRequest,
+    PutObjectRequest,
+    S3Client,
+    StreamingBody,
+    S3,
+};
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
@@ -41,13 +49,12 @@ impl BlobStorageBackend {
         let http_client = HttpClient::new_with_config(http_config)
             .with_context(|| "Failed to create request dispatcher")?;
 
-        let region = Region::Custom { name: region, endpoint };
+        let region = Region::Custom {
+            name: region,
+            endpoint,
+        };
 
-        let client = S3Client::new_with(
-            http_client,
-            credentials_provider,
-            region,
-        );
+        let client = S3Client::new_with(http_client, credentials_provider, region);
 
         Ok(Self {
             bucket_name: name,
@@ -64,7 +71,13 @@ impl BlobStorageBackend {
         image_id: Uuid,
         format: ImageKind,
     ) -> String {
-        format!("{}/{}/{}.{}", bucket_id, sizing_id, image_id, format.as_file_extension())
+        format!(
+            "{}/{}/{}.{}",
+            bucket_id,
+            sizing_id,
+            image_id,
+            format.as_file_extension()
+        )
     }
 }
 
@@ -87,7 +100,11 @@ impl StorageBackend for BlobStorageBackend {
             key: store_in,
             body: Some(StreamingBody::from(data.to_vec())),
             content_length: Some(data.len() as i64),
-            acl: if self.store_public { Some("public-read".to_string()) } else { None },
+            acl: if self.store_public {
+                Some("public-read".to_string())
+            } else {
+                None
+            },
             ..Default::default()
         };
 
@@ -115,10 +132,7 @@ impl StorageBackend for BlobStorageBackend {
 
         if let Some(body) = res.body {
             let mut buffer = Vec::with_capacity(content_length);
-            body
-                .into_async_read()
-                .read_to_end(&mut buffer)
-                .await?;
+            body.into_async_read().read_to_end(&mut buffer).await?;
 
             Ok(Some(buffer.into()))
         } else {
@@ -154,6 +168,3 @@ impl StorageBackend for BlobStorageBackend {
         Ok(hit_entries)
     }
 }
-
-
-

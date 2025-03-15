@@ -1,5 +1,6 @@
 use std::io::ErrorKind;
 use std::path::PathBuf;
+
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -15,9 +16,7 @@ pub struct FileSystemBackend {
 
 impl FileSystemBackend {
     pub fn new(dir: PathBuf) -> Self {
-        Self {
-            directory: dir,
-        }
+        Self { directory: dir }
     }
 
     #[inline]
@@ -49,7 +48,7 @@ impl StorageBackend for FileSystemBackend {
                 tokio::fs::write(&path, data).await?;
                 Ok(())
             },
-            Err(other) => Err(other.into())
+            Err(other) => Err(other.into()),
         }
     }
 
@@ -84,10 +83,11 @@ impl StorageBackend for FileSystemBackend {
         for sizing_id in bucket.sizing_preset_ids().iter().copied() {
             for kind in ImageKind::variants() {
                 let store_in = self.format_path(bucket_id, sizing_id);
-                let path = store_in.join(format!("{}.{}", image_id, kind.as_file_extension()));
+                let path =
+                    store_in.join(format!("{}.{}", image_id, kind.as_file_extension()));
                 debug!("Purging image  @ {:?}", &path);
 
-                 match tokio::fs::remove_file(&path).await {
+                match tokio::fs::remove_file(&path).await {
                     Ok(()) => {
                         hit_entries.push((sizing_id, *kind));
                     },
@@ -100,6 +100,3 @@ impl StorageBackend for FileSystemBackend {
         Ok(hit_entries)
     }
 }
-
-
-

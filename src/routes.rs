@@ -1,24 +1,22 @@
 use std::fmt::Display;
+
 use bytes::Bytes;
-use poem_openapi::OpenApi;
+use futures::StreamExt;
 use poem::{Body, Result};
-use poem_openapi::{ApiResponse, Object};
 use poem_openapi::param::{Header, Path, Query};
 use poem_openapi::payload::{Binary, Json};
-use futures::StreamExt;
+use poem_openapi::{ApiResponse, Object, OpenApi};
 use uuid::Uuid;
 
 use crate::config::{config, ImageKind};
-use crate::controller::{BucketController, get_bucket_by_name, UploadInfo};
+use crate::controller::{get_bucket_by_name, BucketController, UploadInfo};
 use crate::pipelines::ProcessingMode;
-
 
 #[derive(Debug, Object)]
 pub struct Detail {
     /// Additional information regarding the response.
     detail: String,
 }
-
 
 #[derive(ApiResponse)]
 pub enum UploadResponse {
@@ -68,10 +66,7 @@ pub enum DeleteResponse {
 #[derive(ApiResponse)]
 pub enum FetchResponse {
     #[oai(status = 200)]
-    Ok(
-        Binary<Vec<u8>>,
-        #[oai(header = "content-type")] String,
-    ),
+    Ok(Binary<Vec<u8>>, #[oai(header = "content-type")] String),
 
     /// The request is invalid with the current configuration.
     ///
@@ -112,8 +107,7 @@ impl FetchResponse {
     }
 }
 
-
-pub struct LustApi ;
+pub struct LustApi;
 
 #[OpenApi(prefix_path = "/:bucket")]
 impl LustApi {
@@ -131,7 +125,8 @@ impl LustApi {
         bucket: Path<String>,
 
         /// The total size of the image in bytes.
-        #[oai(name = "content-length")] content_length: Header<usize>,
+        #[oai(name = "content-length")]
+        content_length: Header<usize>,
 
         /// The format that the uploaded image is encoded in.
         ///
@@ -147,7 +142,7 @@ impl LustApi {
         };
 
         let length = if !config().valid_global_size(*content_length) {
-            return Ok(UploadResponse::TooBig)
+            return Ok(UploadResponse::TooBig);
         } else {
             let local_limit = bucket
                 .cfg()
@@ -155,8 +150,8 @@ impl LustApi {
                 .map(|v| (v * 1024) as usize)
                 .unwrap_or(u32::MAX as usize);
 
-            if *content_length > local_limit  {
-                return Ok(UploadResponse::TooBig)
+            if *content_length > local_limit {
+                return Ok(UploadResponse::TooBig);
             }
 
             *content_length
@@ -169,14 +164,15 @@ impl LustApi {
             allocated_image.extend(chunk.into_iter());
 
             if allocated_image.len() > length {
-                return Ok(UploadResponse::TooBig)
+                return Ok(UploadResponse::TooBig);
             }
         }
 
         let format = if let Some(format) = format.0 {
-            let validate = image::load_from_memory_with_format(&allocated_image, format.into());
+            let validate =
+                image::load_from_memory_with_format(&allocated_image, format.into());
             if validate.is_err() {
-                return Ok(UploadResponse::InvalidImageFormat)
+                return Ok(UploadResponse::InvalidImageFormat);
             }
 
             format
@@ -188,7 +184,7 @@ impl LustApi {
             if let Some(guessed) = maybe_guessed {
                 guessed
             } else {
-                return Ok(UploadResponse::InvalidImageFormat)
+                return Ok(UploadResponse::InvalidImageFormat);
             }
         };
 
@@ -233,23 +229,32 @@ impl LustApi {
 
         let kind = get_image_kind(format.0, accept.0, bucket);
         let custom_sizing = match (width.0, height.0) {
-            (Some(w), Some(h)) => if bucket.cfg().mode != ProcessingMode::Realtime {
-                return Ok(FetchResponse::bad_request(
+            (Some(w), Some(h)) => {
+                if bucket.cfg().mode != ProcessingMode::Realtime {
+                    return Ok(FetchResponse::bad_request(
                     "Custom resizing can only be done when bucket set to 'realtime' processing mode",
-                ))
-            } else {
-                Some((w, h))
+                ));
+                } else {
+                    Some((w, h))
+                }
             },
             (None, None) => None,
-            _ => return Ok(FetchResponse::bad_request(
-                "A custom size must include both the width and the height.",
-            ))
+            _ => {
+                return Ok(FetchResponse::bad_request(
+                    "A custom size must include both the width and the height.",
+                ))
+            },
         };
 
-        let img = bucket.fetch(image_id.0, kind, size.0, custom_sizing).await?;
+        let img = bucket
+            .fetch(image_id.0, kind, size.0, custom_sizing)
+            .await?;
         match img {
             None => Ok(FetchResponse::image_not_found(image_id.0)),
-            Some(img) => Ok(FetchResponse::Ok(Binary(img.data.to_vec()), img.kind.as_content_type()))
+            Some(img) => Ok(FetchResponse::Ok(
+                Binary(img.data.to_vec()),
+                img.kind.as_content_type(),
+            )),
         }
     }
 
@@ -279,8 +284,11 @@ impl LustApi {
     }
 }
 
-
-fn get_image_kind(direct_format: Option<ImageKind>, accept: Option<String>, bucket: &BucketController) -> ImageKind {
+fn get_image_kind(
+    direct_format: Option<ImageKind>,
+    accept: Option<String>,
+    bucket: &BucketController,
+) -> ImageKind {
     match direct_format {
         Some(kind) => kind,
         None => match accept {
@@ -292,14 +300,15 @@ fn get_image_kind(direct_format: Option<ImageKind>, accept: Option<String>, buck
                     }
                 }
 
-                bucket.cfg()
+                bucket
+                    .cfg()
                     .default_serving_format
                     .unwrap_or_else(|| bucket.cfg().formats.first_enabled_format())
             },
-            None => bucket.cfg()
+            None => bucket
+                .cfg()
                 .default_serving_format
-                .unwrap_or_else(|| bucket.cfg().formats.first_enabled_format())
+                .unwrap_or_else(|| bucket.cfg().formats.first_enabled_format()),
         },
     }
 }
-

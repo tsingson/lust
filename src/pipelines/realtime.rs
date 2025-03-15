@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use hashbrown::HashMap;
 use image::load_from_memory_with_format;
+
 use crate::config::{BucketConfig, ImageFormats, ImageKind, ResizingConfig};
 use crate::pipelines::{Pipeline, PipelineResult, StoreEntry};
 use crate::processor;
@@ -13,7 +14,8 @@ pub struct RealtimePipeline {
 impl RealtimePipeline {
     pub fn new(cfg: &BucketConfig) -> Self {
         Self {
-            presets: cfg.presets
+            presets: cfg
+                .presets
                 .iter()
                 .map(|(key, cfg)| (crate::utils::crc_hash(key), *cfg))
                 .collect(),
@@ -23,7 +25,11 @@ impl RealtimePipeline {
 }
 
 impl Pipeline for RealtimePipeline {
-    fn on_upload(&self, kind: ImageKind, data: Vec<u8>) -> anyhow::Result<PipelineResult> {
+    fn on_upload(
+        &self,
+        kind: ImageKind,
+        data: Vec<u8>,
+    ) -> anyhow::Result<PipelineResult> {
         let webp_config = webp::config(
             self.formats.webp_config.quality.is_none(),
             self.formats.webp_config.quality.unwrap_or(50f32),
@@ -32,11 +38,20 @@ impl Pipeline for RealtimePipeline {
         );
 
         let img = load_from_memory_with_format(&data, kind.into())?;
-        let img = processor::encoder::encode_once(webp_config, self.formats.original_image_store_format, img, 0)?;
+        let img = processor::encoder::encode_once(
+            webp_config,
+            self.formats.original_image_store_format,
+            img,
+            0,
+        )?;
 
         Ok(PipelineResult {
             response: None,
-            to_store: vec![StoreEntry { kind: img.kind, data: img.buff, sizing_id: 0 }],
+            to_store: vec![StoreEntry {
+                kind: img.kind,
+                data: img.buff,
+                sizing_id: 0,
+            }],
         })
     }
 
@@ -58,17 +73,19 @@ impl Pipeline for RealtimePipeline {
         let img = load_from_memory_with_format(&data, data_kind.into())?;
         let (img, sizing_id) = if sizing_id != 0 {
             let maybe_resize = match self.presets.get(&sizing_id) {
-                None => if let Some((width, height)) = custom_size {
-                    Some((
-                        ResizingConfig {
-                            width,
-                            height,
-                            filter: Default::default()
-                        },
-                        crate::utils::crc_hash((width, height)),
-                    ))
-                } else {
-                    None
+                None => {
+                    if let Some((width, height)) = custom_size {
+                        Some((
+                            ResizingConfig {
+                                width,
+                                height,
+                                filter: Default::default(),
+                            },
+                            crate::utils::crc_hash((width, height)),
+                        ))
+                    } else {
+                        None
+                    }
                 },
                 other => other.map(|v| (*v, sizing_id)),
             };
@@ -82,12 +99,8 @@ impl Pipeline for RealtimePipeline {
             (img, 0)
         };
 
-        let encoded = processor::encoder::encode_once(
-            webp_config,
-            desired_kind,
-            img,
-            sizing_id,
-        )?;
+        let encoded =
+            processor::encoder::encode_once(webp_config, desired_kind, img, sizing_id)?;
 
         Ok(PipelineResult {
             response: Some(StoreEntry {
@@ -95,7 +108,7 @@ impl Pipeline for RealtimePipeline {
                 data: encoded.buff,
                 sizing_id: encoded.sizing_id,
             }),
-            to_store: vec![]
+            to_store: vec![],
         })
     }
 }

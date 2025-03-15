@@ -1,13 +1,14 @@
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Instant;
+
 use bytes::Bytes;
 use once_cell::sync::OnceCell;
-use uuid::Uuid;
 use poem_openapi::Object;
 use tokio::sync::{Semaphore, SemaphorePermit};
-use crate::cache::{Cache, global_cache};
+use uuid::Uuid;
 
+use crate::cache::{global_cache, Cache};
 use crate::config::{BucketConfig, ImageKind};
 use crate::pipelines::{PipelineController, ProcessingMode, StoreEntry};
 use crate::storage::template::StorageBackend;
@@ -32,16 +33,15 @@ async fn get_optional_permit<'a>(
     local: &'a Option<Semaphore>,
 ) -> anyhow::Result<Option<SemaphorePermit<'a>>> {
     if let Some(limiter) = global {
-        return Ok(Some(limiter.acquire().await?))
+        return Ok(Some(limiter.acquire().await?));
     }
 
     if let Some(limiter) = local {
-        return Ok(Some(limiter.acquire().await?))
+        return Ok(Some(limiter.acquire().await?));
     }
 
     Ok(None)
 }
-
 
 #[derive(Object, Debug)]
 pub struct ImageUploadInfo {
@@ -107,28 +107,37 @@ impl BucketController {
             storage,
         }
     }
-    
+
     #[inline]
     pub fn cfg(&self) -> &BucketConfig {
         &self.config
     }
 
-    pub async fn upload(&self, kind: ImageKind, data: Vec<u8>) -> anyhow::Result<UploadInfo> {
-        debug!("Uploading processed image with kind: {:?} and is {} bytes in size.", kind, data.len());
+    pub async fn upload(
+        &self,
+        kind: ImageKind,
+        data: Vec<u8>,
+    ) -> anyhow::Result<UploadInfo> {
+        debug!(
+            "Uploading processed image with kind: {:?} and is {} bytes in size.",
+            kind,
+            data.len()
+        );
 
         let _permit = get_optional_permit(&self.global_limiter, &self.limiter).await?;
 
         let processing_start = Instant::now();
         let checksum = crc32fast::hash(&data);
         let pipeline = self.pipeline.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            pipeline.on_upload(kind, data)
-        }).await??;
+        let result = tokio::task::spawn_blocking(move || pipeline.on_upload(kind, data))
+            .await??;
         let processing_time = processing_start.elapsed();
 
         let image_id = Uuid::new_v4();
         let io_start = Instant::now();
-        let image_upload_info = self.concurrent_upload(image_id, result.result.to_store).await?;
+        let image_upload_info = self
+            .concurrent_upload(image_id, result.result.to_store)
+            .await?;
         let io_time = io_start.elapsed();
 
         Ok(UploadInfo {
@@ -160,11 +169,11 @@ impl BucketController {
             .unwrap_or_else(|| self.config.default_serving_preset.clone());
 
         let sizing_id = if let Some(sizing_preset) = sizing {
-          if sizing_preset == "original" {
-              0
-          } else {
-              crate::utils::crc_hash(sizing_preset)
-          }
+            if sizing_preset == "original" {
+                0
+            } else {
+                crate::utils::crc_hash(sizing_preset)
+            }
         } else {
             0
         };
@@ -176,28 +185,32 @@ impl BucketController {
             desired_kind
         };
 
-        let maybe_existing = self.caching_fetch(
-            image_id,
-            fetch_kind,
-            if self.config.mode == ProcessingMode::Realtime { 0 } else { sizing_id },
-        ).await?;
+        let maybe_existing = self
+            .caching_fetch(
+                image_id,
+                fetch_kind,
+                if self.config.mode == ProcessingMode::Realtime {
+                    0
+                } else {
+                    sizing_id
+                },
+            )
+            .await?;
 
         let (data, retrieved_kind) = match maybe_existing {
             // If we're in JIT mode we want to re-encode the image and store it.
-            None => if self.config.mode == ProcessingMode::Jit {
-                let base_kind = self.config.formats.original_image_store_format;
-                let value = self.caching_fetch(
-                    image_id,
-                    base_kind,
-                    0,
-                ).await?;
+            None => {
+                if self.config.mode == ProcessingMode::Jit {
+                    let base_kind = self.config.formats.original_image_store_format;
+                    let value = self.caching_fetch(image_id, base_kind, 0).await?;
 
-                match value {
-                    None => return Ok(None),
-                    Some(original) => (original, base_kind)
+                    match value {
+                        None => return Ok(None),
+                        Some(original) => (original, base_kind),
+                    }
+                } else {
+                    return Ok(None);
                 }
-            } else {
-                return Ok(None)
             },
             Some(computed) => (computed, fetch_kind),
         };
@@ -205,15 +218,27 @@ impl BucketController {
         // Small optimisation here when in AOT mode to avoid
         // spawning additional threads.
         if self.config.mode == ProcessingMode::Aot {
-            return Ok(Some(StoreEntry { data, kind: retrieved_kind, sizing_id }))
+            return Ok(Some(StoreEntry {
+                data,
+                kind: retrieved_kind,
+                sizing_id,
+            }));
         }
 
         let pipeline = self.pipeline.clone();
         let result = tokio::task::spawn_blocking(move || {
-            pipeline.on_fetch(desired_kind, retrieved_kind, data, sizing_id, custom_sizing)
-        }).await??;
+            pipeline.on_fetch(
+                desired_kind,
+                retrieved_kind,
+                data,
+                sizing_id,
+                custom_sizing,
+            )
+        })
+        .await??;
 
-        self.concurrent_upload(image_id, result.result.to_store).await?;
+        self.concurrent_upload(image_id, result.result.to_store)
+            .await?;
 
         Ok(result.result.response)
     }
@@ -238,7 +263,7 @@ impl BucketController {
 impl BucketController {
     #[inline]
     fn cache_key(&self, sizing_id: u32, image_id: Uuid, kind: ImageKind) -> String {
-         format!(
+        format!(
             "{bucket}:{sizing}:{image}:{kind}",
             bucket = self.bucket_id,
             sizing = sizing_id,
@@ -253,7 +278,8 @@ impl BucketController {
         fetch_kind: ImageKind,
         sizing_id: u32,
     ) -> anyhow::Result<Option<Bytes>> {
-        let maybe_cache_backend = self.cache
+        let maybe_cache_backend = self
+            .cache
             .as_ref()
             .map(|v| Some(v.as_ref()))
             .unwrap_or_else(global_cache);
@@ -262,16 +288,14 @@ impl BucketController {
 
         if let Some(cache) = maybe_cache_backend {
             if let Some(buffer) = cache.get(&cache_key) {
-                return Ok(Some(buffer))
+                return Ok(Some(buffer));
             }
         }
 
-        let maybe_existing = self.storage.fetch(
-            self.bucket_id,
-            image_id,
-            fetch_kind,
-            sizing_id
-        ).await?;
+        let maybe_existing = self
+            .storage
+            .fetch(self.bucket_id, image_id, fetch_kind, sizing_id)
+            .await?;
 
         if let Some(cache) = maybe_cache_backend {
             if let Some(ref buffer) = maybe_existing {
@@ -290,24 +314,25 @@ impl BucketController {
         let mut image_upload_info = vec![];
         let mut tasks = vec![];
         for store_entry in to_store {
-            image_upload_info.push(ImageUploadInfo { sizing_id: store_entry.sizing_id });
+            image_upload_info.push(ImageUploadInfo {
+                sizing_id: store_entry.sizing_id,
+            });
             let storage = self.storage.clone();
             let bucket_id = self.bucket_id;
             let cache = self.cache.clone();
-            let cache_key = self.cache_key(
-                store_entry.sizing_id,
-                image_id,
-                store_entry.kind,
-            );
+            let cache_key =
+                self.cache_key(store_entry.sizing_id, image_id, store_entry.kind);
 
             let t = tokio::spawn(async move {
-                storage.store(
-                    bucket_id,
-                    image_id,
-                    store_entry.kind,
-                    store_entry.sizing_id,
-                    store_entry.data.clone(),
-                ).await?;
+                storage
+                    .store(
+                        bucket_id,
+                        image_id,
+                        store_entry.kind,
+                        store_entry.sizing_id,
+                        store_entry.data.clone(),
+                    )
+                    .await?;
 
                 if let Some(ref cache) = cache {
                     cache.insert(cache_key, store_entry.data);
@@ -326,4 +351,3 @@ impl BucketController {
         Ok(image_upload_info)
     }
 }
-
